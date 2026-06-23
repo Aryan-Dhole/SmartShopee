@@ -1,0 +1,6 @@
+{
+  "name": "PriceWise",
+  "description": "Cross-platform price intelligence tool. Search products, track prices with custom alert thresholds, analyze price history charts, and get AI-powered review summaries.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

@@ -1,0 +1,111 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // Default-deny Catch-all Security Rule
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // ── User Preferences ────────────────────────────────────────
+    match /userPreferences/{userId} {
+      allow get, list: if isSignedIn() && request.auth.uid == userId;
+      
+      allow create: if isSignedIn() && 
+                      request.auth.uid == userId &&
+                      incoming().userId == request.auth.uid &&
+                      isValidUserPreferences(incoming());
+                      
+      allow update: if isSignedIn() && 
+                      request.auth.uid == userId &&
+                      incoming().userId == request.auth.uid &&
+                      isValidUserPreferences(incoming());
+                      
+      allow delete: if isSignedIn() && request.auth.uid == userId;
+    }
+
+    // ── Search History ─────────────────────────────────────────
+    match /searchHistory/{userId}/entries/{entryId} {
+      allow get, list: if isSignedIn() && request.auth.uid == userId;
+      
+      allow create: if isSignedIn() && 
+                      request.auth.uid == userId &&
+                      incoming().userId == request.auth.uid &&
+                      incoming().query is string &&
+                      incoming().query.size() <= 500;
+                      
+      allow delete: if isSignedIn() && request.auth.uid == userId;
+    }
+
+    match /trackedProducts/{trackId} {
+      allow get: if isSignedIn() && isOwner(existing());
+      allow list: if isSignedIn() && resource.data.userId == request.auth.uid;
+      
+      allow create: if isSignedIn() && 
+                      isValidId(trackId) && 
+                      trackId == incoming().id &&
+                      incoming().userId == request.auth.uid &&
+                      isValidTrackedProduct(incoming()) &&
+                      incoming().createdAt == request.time &&
+                      incoming().updatedAt == request.time;
+                      
+      allow update: if isSignedIn() &&
+                      isValidId(trackId) &&
+                      isOwner(existing()) &&
+                      incoming().userId == existing().userId &&
+                      incoming().createdAt == existing().createdAt &&
+                      isValidTrackedProduct(incoming()) &&
+                      incoming().updatedAt == request.time && (
+                        // Action 1: Update target price
+                        incoming().diff(existing()).affectedKeys().hasOnly(['targetPrice', 'updatedAt']) ||
+                        // Action 2: Scraped updates of price metrics (either user-initiated scrap or backend trigger)
+                        incoming().diff(existing()).affectedKeys().hasOnly(['currentPrice', 'priceHistory', 'updatedAt'])
+                      );
+                      
+      allow delete: if isSignedIn() && isOwner(existing());
+    }
+
+    // Zero-Trust Security Helper Primitives
+    function isSignedIn() {
+      return request.auth != null;
+    }
+    
+    function isOwner(data) {
+      return data.userId == request.auth.uid;
+    }
+    
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+    
+    function incoming() {
+      return request.resource.data;
+    }
+    
+    function existing() {
+      return resource.data;
+    }
+    
+    function isValidTrackedProduct(data) {
+      return data.id is string && data.id.size() <= 128 &&
+             data.userId is string && data.userId.size() <= 128 &&
+             data.productName is string && data.productName.size() <= 500 &&
+             data.url is string && data.url.size() <= 2048 &&
+             data.imageUrl is string && data.imageUrl.size() <= 2048 &&
+             data.platform is string && data.platform.size() <= 100 &&
+             data.currentPrice is number && data.currentPrice >= 0 &&
+             data.targetPrice is number && data.targetPrice >= 0 &&
+             data.priceHistory is list && data.priceHistory.size() <= 100;
+    }
+
+    function isValidUserPreferences(data) {
+      return data.userId is string && data.userId.size() <= 128 &&
+             data.theme is string && data.theme in ['dark', 'light', 'system'] &&
+             data.currency is string && data.currency in ['INR', 'USD'] &&
+             data.notificationsEnabled is bool &&
+             data.emailNotifications is bool &&
+             data.defaultPriceDropPercent is number && 
+             data.defaultPriceDropPercent >= 0 && data.defaultPriceDropPercent <= 100;
+    }
+  }
+}

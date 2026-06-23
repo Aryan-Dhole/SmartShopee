@@ -1,0 +1,75 @@
+{
+  "entities": {
+    "TrackedProduct": {
+      "title": "TrackedProduct",
+      "description": "Represents a product being tracked by a user for price drops",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique identifier for the track"
+        },
+        "userId": {
+          "type": "string",
+          "description": "The user ID of the tracking user"
+        },
+        "productName": {
+          "type": "string",
+          "description": "Name of the product"
+        },
+        "url": {
+          "type": "string",
+          "description": "Original URL of the product on the platform"
+        },
+        "imageUrl": {
+          "type": "string",
+          "description": "URL of the product image"
+        },
+        "platform": {
+          "type": "string",
+          "description": "Platform (Amazon, Flipkart, etc.)"
+        },
+        "currentPrice": {
+          "type": "number",
+          "description": "The most recently scraped price"
+        },
+        "targetPrice": {
+          "type": "number",
+          "description": "The target price threshold for alerting"
+        },
+        "initialPrice": {
+          "type": "number",
+          "description": "Price when tracking was initiated"
+        },
+        "priceHistory": {
+          "type": "array",
+          "description": "Chronological array of past price observations"
+        },
+        "createdAt": {
+          "type": "object",
+          "description": "When tracking was started"
+        },
+        "updatedAt": {
+          "type": "object",
+          "description": "When price was last updated"
+        }
+      },
+      "required": [
+        "id",
+        "userId",
+        "productName",
+        "currentPrice",
+        "targetPrice",
+        "priceHistory",
+        "createdAt",
+        "updatedAt"
+      ]
+    }
+  },
+  "firestore": {
+    "/trackedProducts/{trackId}": {
+      "schema": "TrackedProduct",
+      "description": "A collection of user-tracked items"
+    }
+  }
+}
