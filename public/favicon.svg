@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32">
+  <style>
+    .bg {
+      fill: #171717;
+      rx: 9px;
+    }
+    .inner {
+      fill: #ffffff;
+      rx: 2.5px;
+    }
+    @media (prefers-color-scheme: dark) {
+      .bg {
+        fill: #ffffff;
+      }
+      .inner {
+        fill: #050505;
+      }
+    }
+  </style>
+  <rect class="bg" width="32" height="32" />
+  <rect class="inner" x="9" y="9" width="14" height="14" />
+</svg>
