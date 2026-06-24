@@ -236,7 +236,6 @@ export default function SearchPage() {
               onChange={(e) => {
                 setSearchQuery(e.target.value);
                 setShowHistory(true);
-                triggerPrefetch(e.target.value);
               }}
               onFocus={() => {
                 setInputFocused(true);

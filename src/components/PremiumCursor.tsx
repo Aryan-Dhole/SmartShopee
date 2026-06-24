@@ -65,8 +65,6 @@ export default function PremiumCursor() {
       <motion.div
         id="premium-cursor-ring"
         style={{
-          clientX: cursorSpringX,
-          clientY: cursorSpringY,
           x: cursorSpringX,
           y: cursorSpringY,
         }}
@@ -84,8 +82,6 @@ export default function PremiumCursor() {
       <motion.div
         id="premium-cursor-dot"
         style={{
-          clientX: cursorSpringX,
-          clientY: cursorSpringY,
           x: cursorSpringX,
           y: cursorSpringY,
         }}

@@ -159,6 +159,120 @@ function normalizePlatformName(name: string): string {
   return map[lower] || name;
 }
 
+// ─── Relevance Scoring & Accessory Filtering ────────────────────────
+
+/**
+ * Patterns that indicate an accessory/related item rather than the main product.
+ * Used to filter out "iPhone 16 case" when user searches for "iPhone 16".
+ */
+const ACCESSORY_PATTERNS = [
+  /\bcase\b/i, /\bcover\b/i, /\bcovers\b/i, /\bcases\b/i,
+  /\bskin\b/i, /\bskins\b/i,
+  /\bscreen\s*guard\b/i, /\bscreen\s*protector\b/i, /\btempered\s*glass\b/i,
+  /\badapter\b/i, /\badaptor\b/i, /\bcharger\b/i, /\bcharging\s*cable\b/i,
+  /\bcable\b/i, /\bcord\b/i,
+  /\bstand\b/i, /\bholder\b/i, /\bmount\b/i, /\btripod\b/i,
+  /\bpouch\b/i, /\bsleeve\b/i, /\bbag\b/i,
+  /\bsticker\b/i, /\bdecal\b/i,
+  /\bfilm\b/i,
+  /\bearphone\s*case\b/i, /\bairpods?\s*case\b/i,
+  /\bback\s*cover\b/i, /\bback\s*panel\b/i, /\bbumper\b/i,
+  /\bflip\s*cover\b/i, /\bwallet\s*case\b/i, /\bfolio\b/i,
+  /\bprotective\s*film\b/i, /\blens\s*protector\b/i, /\bcamera\s*protector\b/i,
+  /\bstrap\b/i, /\bband\b/i,
+  /\bdock\b/i, /\bcradle\b/i,
+  /\bkeyboard\s*cover\b/i, /\bpalm\s*rest\b/i,
+  /\breplacement\s*part\b/i, /\bspare\b/i,
+];
+
+/**
+ * Product categories that are clearly "main products" — searching for these
+ * means the user wants the product itself, not accessories.
+ */
+const MAIN_PRODUCT_SIGNALS = [
+  /iphone\s*\d/i, /ipad/i, /macbook/i, /apple\s*watch/i,
+  /galaxy\s*s\d/i, /galaxy\s*z/i, /galaxy\s*a\d/i, /galaxy\s*tab/i,
+  /pixel\s*\d/i, /oneplus\s*\d/i, /nothing\s*phone/i,
+  /redmi\s*\w/i, /poco\s*\w/i, /realme\s*\w/i, /vivo\s*\w/i, /oppo\s*\w/i,
+  /laptop/i, /notebook/i, /chromebook/i,
+  /television|smart\s*tv|\btv\b/i,
+  /refrigerator|fridge/i, /washing\s*machine/i,
+  /playstation|xbox|nintendo/i,
+  /camera\s*(body|kit|dslr|mirrorless)/i,
+];
+
+/**
+ * Check if a query is searching for a "main product" (not accessories).
+ */
+function isMainProductQuery(query: string): boolean {
+  return MAIN_PRODUCT_SIGNALS.some(p => p.test(query));
+}
+
+/**
+ * Check if a result title looks like an accessory for the searched product.
+ * Returns true if it's likely an accessory that should be filtered out.
+ */
+function isLikelyAccessory(title: string, query: string): boolean {
+  // Only filter if the query looks like a main product search
+  if (!isMainProductQuery(query)) return false;
+
+  const titleLower = title.toLowerCase();
+  const queryLower = query.toLowerCase();
+
+  // If the title contains the exact query and an accessory keyword, it's an accessory
+  for (const pattern of ACCESSORY_PATTERNS) {
+    if (pattern.test(titleLower)) {
+      // Make sure the accessory word isn't part of the original query
+      // e.g. searching for "phone case" should NOT filter out cases
+      if (!pattern.test(queryLower)) {
+        return true;
+      }
+    }
+  }
+
+  return false;
+}
+
+/**
+ * Extract core keywords from query for relevance matching.
+ * "Apple iPhone 16 Pro Max 256GB" → ["apple", "iphone", "16", "pro", "max"]
+ */
+function extractCoreKeywords(text: string): string[] {
+  return text
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, "")
+    .split(/\s+/)
+    .filter(w => w.length >= 2);
+}
+
+/**
+ * Compute how relevant a product title is to the search query.
+ * Returns a score from 0-100 where 100 = perfect match.
+ */
+function computeRelevanceScore(title: string, query: string): number {
+  const queryKeywords = extractCoreKeywords(query);
+  const titleKeywords = extractCoreKeywords(title);
+  if (queryKeywords.length === 0) return 50; // neutral
+
+  let matchCount = 0;
+  for (const qk of queryKeywords) {
+    // Check for exact keyword match or prefix match (e.g. "pro" matches "pro")
+    if (titleKeywords.some(tk => tk === qk || tk.startsWith(qk) || qk.startsWith(tk))) {
+      matchCount++;
+    }
+  }
+
+  const matchRatio = matchCount / queryKeywords.length;
+  let score = Math.round(matchRatio * 80); // up to 80 points for keyword match
+
+  // Bonus: if title contains the exact query substring
+  if (title.toLowerCase().includes(query.toLowerCase())) {
+    score += 20;
+  }
+
+  return Math.min(100, score);
+}
+
 // ─── Gemini Search (for platforms we don't scrape directly) ─────────
 
 async function geminiSearch(query: string, isUrl: boolean): Promise<ProductSearchResult[]> {
@@ -283,13 +397,39 @@ export async function performProductSearch(query: string): Promise<ProductSearch
       console.warn("[Search] Gemini search failed:", (geminiResults as any).reason?.message);
     }
 
-    // Sort by price
-    allResults.sort((a, b) => a.price - b.price);
+    // ── Relevance filtering: remove accessories when searching for a main product ──
+    const isMainProduct = isMainProductQuery(query);
+    let relevantResults = allResults;
 
-    if (allResults.length > 0) {
-      setCache(cacheKey, allResults);
-      console.log(`[Search] Total: ${allResults.length} results for "${query}"`);
-      return allResults;
+    if (isMainProduct && !isUrl) {
+      const beforeCount = relevantResults.length;
+      relevantResults = relevantResults.filter(r => !isLikelyAccessory(r.title, query));
+      const filtered = beforeCount - relevantResults.length;
+      if (filtered > 0) {
+        console.log(`[Search] Filtered ${filtered} accessory results for main product query "${query}"`);
+      }
+    }
+
+    // ── Relevance scoring: sort by how well each result matches the query ──
+    const scored = relevantResults.map(r => ({
+      ...r,
+      _relevanceScore: computeRelevanceScore(r.title, query),
+    }));
+
+    // Sort by relevance (high → low), then by price (low → high) as tiebreaker
+    scored.sort((a, b) => {
+      const relevanceDiff = b._relevanceScore - a._relevanceScore;
+      if (Math.abs(relevanceDiff) >= 10) return relevanceDiff; // significant relevance difference
+      return a.price - b.price; // similar relevance → cheaper first
+    });
+
+    // Strip internal scoring field before returning
+    const finalResults: ProductSearchResult[] = scored.map(({ _relevanceScore, ...rest }) => rest);
+
+    if (finalResults.length > 0) {
+      setCache(cacheKey, finalResults);
+      console.log(`[Search] Total: ${finalResults.length} results for "${query}" (${isMainProduct ? 'main product mode' : 'general mode'})`);
+      return finalResults;
     }
 
     // If everything failed, return empty — no fake data

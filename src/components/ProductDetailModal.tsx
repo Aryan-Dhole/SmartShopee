@@ -32,7 +32,7 @@ import {
 } from "recharts";
 import { ProductSearchResult, AIReviewSummary, SmartAlternative, MerchantDeal } from "../types";
 import { getReviewSummary, getAlternatives, getRealDeals } from "../services/api-client";
-import { fetchDealsWithGemini } from "../services/gemini-client";
+import { fetchDealsWithGemini, fetchReviewSummaryWithGemini } from "../services/gemini-client";
 import { auth, googleAuthProvider } from "../firebase";
 import { signInWithPopup } from "firebase/auth";
 import { trackProduct } from "../firebase-service";
@@ -97,13 +97,27 @@ export default function ProductDetailModal({
     setFavorite(false);
     setTargetPrice(Math.round(product.price * 0.9));
 
-    // Fetch AI Summarized Reviews
+    // Fetch AI Summarized Reviews — try client-side Gemini first (AQ. API key works in browser)
     setLoadingSummary(true);
-    getReviewSummary(product.title, product.platform)
-      .then((data) => {
-        if (data) setAiSummary(data);
+    fetchReviewSummaryWithGemini(product.title, product.platform)
+      .then(async (clientResult) => {
+        if (clientResult) {
+          setAiSummary(clientResult);
+        } else {
+          // Fallback to server API
+          const serverResult = await getReviewSummary(product.title, product.platform);
+          if (serverResult) setAiSummary(serverResult);
+        }
       })
-      .catch((err) => console.error("Error loading reviews: ", err))
+      .catch(async (err) => {
+        console.warn("Client Gemini reviews failed, trying server:", err);
+        try {
+          const serverResult = await getReviewSummary(product.title, product.platform);
+          if (serverResult) setAiSummary(serverResult);
+        } catch (serverErr) {
+          console.error("Error loading reviews from both sources:", serverErr);
+        }
+      })
       .finally(() => setLoadingSummary(false));
 
     // Fetch Smarter Alternatives

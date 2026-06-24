@@ -208,3 +208,106 @@ Return as a JSON array in \`\`\`json block. Each object: platform (string), pric
     return null;
   }
 }
+
+/**
+ * Fetch AI-synthesized review summary directly from browser-side Gemini.
+ * This bypasses the server — necessary because the AQ. prefix API key
+ * only works from browser contexts, not Node.js.
+ */
+export async function fetchReviewSummaryWithGemini(
+  productName: string,
+  platform: string
+): Promise<{ summary: string; pros: string[]; cons: string[]; verdict: string } | null> {
+  const ai = getClient();
+  if (!ai) return null;
+
+  const prompt = `Synthesize customer feedback and reviews for "${productName}" from ${platform} and other sources.
+
+Generate:
+1. A concise summary of overall customer sentiment (2-3 sentences)
+2. 3-4 specific pros (things customers consistently praise)
+3. 2-3 specific cons (common complaints or issues)
+4. A clear buy/skip verdict with reasoning
+
+Base this on actual customer reviews and expert opinions available online. Be specific — mention actual features, not generic praise.
+Return the result strictly as a valid JSON object. It must have: summary (string), pros (array of strings), cons (array of strings), verdict (string). Wrap the object in a \`\`\`json block. Do not include any other text.`;
+
+  const TIMEOUT_MS = 30_000;
+
+  try {
+    const geminiPromise = ai.models.generateContent({
+      model: "gemini-2.5-flash",
+      contents: prompt,
+      config: { tools: [{ googleSearch: {} }] },
+    });
+
+    const timeoutPromise = new Promise<never>((_, reject) =>
+      setTimeout(() => reject(new Error("Gemini review timed out")), TIMEOUT_MS)
+    );
+
+    const response = await Promise.race([geminiPromise, timeoutPromise]);
+    const jsonText = extractJson(response.text || "");
+    if (jsonText) {
+      const result = JSON.parse(jsonText);
+      if (result && result.summary && Array.isArray(result.pros)) {
+        return result;
+      }
+    }
+    return null;
+  } catch (err) {
+    console.warn("[ClientGemini] Review summary failed:", err);
+    return null;
+  }
+}
+
+/**
+ * Send a chat message to Gemini AI shopping assistant directly from browser.
+ * Bypasses the server for the same API key reason.
+ */
+export async function sendChatWithGemini(
+  message: string,
+  context?: { watchlist?: string[]; recentSearches?: string[] }
+): Promise<{ reply: string } | null> {
+  const ai = getClient();
+  if (!ai) return null;
+
+  let contextBlock = "";
+  if (context?.watchlist?.length) {
+    contextBlock += `\nUser is tracking these products: ${context.watchlist.join(", ")}`;
+  }
+  if (context?.recentSearches?.length) {
+    contextBlock += `\nRecent searches: ${context.recentSearches.join(", ")}`;
+  }
+
+  const prompt = `You are PriceWise AI, a helpful shopping assistant for Indian e-commerce. You help users find the best deals, compare products, and make smart purchasing decisions.
+${contextBlock}
+
+User message: "${message}"
+
+Respond naturally and helpfully. If the user asks about specific products, provide current pricing context. Keep responses concise but informative. Use ₹ for Indian Rupee prices.`;
+
+  const TIMEOUT_MS = 30_000;
+
+  try {
+    const geminiPromise = ai.models.generateContent({
+      model: "gemini-2.5-flash",
+      contents: prompt,
+      config: { tools: [{ googleSearch: {} }] },
+    });
+
+    const timeoutPromise = new Promise<never>((_, reject) =>
+      setTimeout(() => reject(new Error("Gemini chat timed out")), TIMEOUT_MS)
+    );
+
+    const response = await Promise.race([geminiPromise, timeoutPromise]);
+    const reply = response.text?.trim();
+    if (reply) {
+      return { reply };
+    }
+    return null;
+  } catch (err) {
+    console.warn("[ClientGemini] Chat failed:", err);
+    return null;
+  }
+}
+

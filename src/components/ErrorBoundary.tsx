@@ -1,9 +1,9 @@
-import React, { Component, ReactNode } from 'react';
+import React from 'react';
 import { AlertTriangle, RefreshCw } from 'lucide-react';
 
 interface Props {
-  children: ReactNode;
-  fallback?: ReactNode;
+  children: React.ReactNode;
+  fallback?: React.ReactNode;
 }
 
 interface State {
@@ -11,11 +11,8 @@ interface State {
   error: Error | null;
 }
 
-export default class ErrorBoundary extends Component<Props, State> {
-  constructor(props: Props) {
-    super(props);
-    this.state = { hasError: false, error: null };
-  }
+export default class ErrorBoundary extends React.Component<Props, State> {
+  state: State = { hasError: false, error: null };
 
   static getDerivedStateFromError(error: Error): State {
     return { hasError: true, error };
@@ -25,9 +22,9 @@ export default class ErrorBoundary extends Component<Props, State> {
     console.error('[PriceWise ErrorBoundary]', error, errorInfo.componentStack);
   }
 
-  handleRetry() {
+  handleRetry = () => {
     this.setState({ hasError: false, error: null });
-  }
+  };
 
   render() {
     if (this.state.hasError) {
@@ -46,7 +43,7 @@ export default class ErrorBoundary extends Component<Props, State> {
               </p>
             </div>
             <button
-              onClick={() => this.handleRetry()}
+              onClick={this.handleRetry}
               className="inline-flex items-center gap-2 px-5 py-2.5 bg-white text-black font-bold text-xs rounded-xl hover:bg-neutral-200 transition-all cursor-pointer"
             >
               <RefreshCw size={14} />

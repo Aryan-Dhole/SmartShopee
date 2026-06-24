@@ -4,6 +4,7 @@ import { MessageSquare, X, Send, Sparkles, Loader2, Bot, User } from 'lucide-rea
 import { useApp } from '../contexts/AppContext';
 import { ChatMessage } from '../types';
 import { sendChatMessage } from '../services/api-client';
+import { sendChatWithGemini } from '../services/gemini-client';
 
 const SUGGESTED_PROMPTS = [
   'Find the best laptop under ₹50,000',
@@ -53,25 +54,47 @@ export default function AIChatPanel() {
     setIsLoading(true);
 
     try {
-      const data = await sendChatMessage(content.trim());
+      // Try client-side Gemini first (AQ. prefix API key works in browser)
+      let replyText: string | null = null;
+
+      const clientResult = await sendChatWithGemini(content.trim());
+      if (clientResult?.reply) {
+        replyText = clientResult.reply;
+      } else {
+        // Fallback to server API
+        const serverResult = await sendChatMessage(content.trim());
+        replyText = serverResult.reply || null;
+      }
 
       const assistantMessage: ChatMessage = {
         id: (Date.now() + 1).toString(),
         role: 'assistant',
-        content: data.reply || "I couldn't process that request. Please try rephrasing your question.",
+        content: replyText || "I couldn't process that request. Please try rephrasing your question.",
         timestamp: new Date(),
       };
 
       setMessages((prev) => [...prev, assistantMessage]);
     } catch (err) {
-      const errorMessage: ChatMessage = {
-        id: (Date.now() + 1).toString(),
-        role: 'assistant',
-        content:
-          "I'm having trouble connecting right now. Please try again in a moment. In the meantime, you can use the search bar to find products directly!",
-        timestamp: new Date(),
-      };
-      setMessages((prev) => [...prev, errorMessage]);
+      // Both client and server failed — try server as last resort
+      try {
+        const serverResult = await sendChatMessage(content.trim());
+        const assistantMessage: ChatMessage = {
+          id: (Date.now() + 1).toString(),
+          role: 'assistant',
+          content: serverResult.reply || "I couldn't process that request.",
+          timestamp: new Date(),
+        };
+        setMessages((prev) => [...prev, assistantMessage]);
+      } catch {
+        const errorMessage: ChatMessage = {
+          id: (Date.now() + 1).toString(),
+          role: 'assistant',
+          content:
+            "I'm having trouble connecting right now. Please try again in a moment. In the meantime, you can use the search bar to find products directly!",
+          timestamp: new Date(),
+        };
+        setMessages((prev) => [...prev, errorMessage]);
+      }
     } finally {
       setIsLoading(false);
     }
