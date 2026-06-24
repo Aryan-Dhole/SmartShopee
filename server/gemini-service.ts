@@ -82,8 +82,8 @@ function validateSearchResults(results: any[], query: string): ProductSearchResu
       // Remove results with clearly invalid prices
       const price = Number(item.price);
       if (!price || price <= 0 || price > 50_000_000) return false;
-      // Must have a title
-      if (!item.title || typeof item.title !== "string" || item.title.trim().length < 2) return false;
+      // Must have a title of reasonable length
+      if (!item.title || typeof item.title !== "string" || item.title.trim().length < 5) return false;
       return true;
     })
     .map((item, index) => {
@@ -106,16 +106,31 @@ function validateSearchResults(results: any[], query: string): ProductSearchResu
         imageUrl = getPlaceholderImage(query);
       }
 
+      // Fix duplicate brand names (e.g., "DailyObjects DailyObjects Bag" → "DailyObjects Bag")
+      let title = item.title.trim();
+      const words = title.split(" ");
+      if (words.length >= 2) {
+        const firstWord = words[0].toLowerCase();
+        const secondWord = words[1].toLowerCase();
+        if (firstWord === secondWord) {
+          title = words.slice(1).join(" ");
+        }
+      }
+
+      // Round rating to 1 decimal place
+      const rawRating = Number(item.rating) || 4.0;
+      const rating = Math.round(Math.min(5, Math.max(0, rawRating)) * 10) / 10;
+
       return {
-        id: simpleHash(platform + item.title + index),
-        title: item.title.trim(),
+        id: simpleHash(platform + title + index),
+        title,
         price: itemPrice,
-        originalPrice: originalPrice && originalPrice > itemPrice ? originalPrice : undefined,
+        originalPrice: originalPrice && originalPrice > itemPrice && originalPrice <= itemPrice * 3 ? originalPrice : undefined,
         platform,
         url,
         imageUrl,
-        rating: Math.min(5, Math.max(0, Number(item.rating) || 4.0)),
-        reviewsCount: Math.max(0, Number(item.reviewsCount) || 0),
+        rating,
+        reviewsCount: Math.max(0, Math.round(Number(item.reviewsCount) || 0)),
         specs: item.specs || {},
       };
     });
@@ -169,16 +184,17 @@ Instructions:
 CRITICAL: Only include listings you can verify exist through web search. Do NOT fabricate or estimate any prices, URLs, or data. If you cannot find a product on a platform, do not include it.
 Return the result strictly as a valid JSON array of objects. Each object must have: title (string), price (number), originalPrice (number or null), platform (string), url (string), imageUrl (string), rating (number), reviewsCount (number). Wrap the array in a \`\`\`json block. Do not include any other text.`;
   } else {
-    targetPrompt = `Search for "${query}" on Indian e-commerce platforms that are NOT Amazon India or Flipkart.
+    targetPrompt = `Search for "${query}" on major Indian e-commerce platforms.
 
 Instructions:
-1. Search across: Croma, Vijay Sales, Reliance Digital, Snapdeal, Meesho, JioMart, Tata CLiQ, Myntra
-2. Return 2-4 real, currently available product listings with CURRENT prices in INR
-3. Include the exact product title as shown on each platform
-4. Include real star ratings (out of 5) and review/rating counts
+1. Search across ALL of these platforms: Amazon India, Flipkart, Croma, Vijay Sales, Reliance Digital, Snapdeal, Meesho, JioMart, Tata CLiQ, Myntra
+2. Return 8-15 real, currently available product listings with CURRENT prices in INR
+3. Include the exact product title as shown on each platform — must be the ACTUAL product matching the query, NOT accessories, cases, covers, or adapters
+4. Include real star ratings (out of 5, rounded to 1 decimal) and review/rating counts
 5. Include actual product listing URLs
 6. Include product image URLs if available
 7. If the product has variants, pick the most popular/default variant
+8. IMPORTANT: Only return listings for the ACTUAL product searched, not accessories or related items. For example, if the query is "iPhone 16", return iPhone 16 phone listings, NOT iPhone cases, screen protectors, chargers, etc.
 
 CRITICAL: Only include listings you can verify through web search. Do NOT fabricate or estimate any prices, URLs, or data. If you cannot find the product on a platform, simply omit that platform.
 Return the result strictly as a valid JSON array of objects. Each object must have: title (string), price (number), originalPrice (number or null), platform (string), url (string), imageUrl (string), rating (number), reviewsCount (number). Wrap the array in a \`\`\`json block. Do not include any other text.`;
@@ -252,14 +268,17 @@ export async function performProductSearch(query: string): Promise<ProductSearch
       console.error("[Search] Scraper orchestrator failed:", scrapeResult.reason);
     }
 
-    // Collect Gemini results (for platforms not covered by scrapers)
+    // Collect Gemini results — deduplicate by platform+title similarity
     if (geminiResults.status === "fulfilled") {
       const gemini = geminiResults.value;
       console.log(`[Search] Gemini returned ${gemini.length} additional results`);
-      // Only add Gemini results for platforms we didn't scrape
-      const scrapedPlatforms = new Set(allResults.map(r => r.platform));
-      const newGemini = gemini.filter(r => !scrapedPlatforms.has(r.platform));
+      // Only add Gemini results for platforms where scrapers returned 0 results
+      const scrapedPlatformsWithResults = new Set(
+        allResults.map(r => r.platform)
+      );
+      const newGemini = gemini.filter(r => !scrapedPlatformsWithResults.has(r.platform));
       allResults.push(...newGemini);
+      console.log(`[Search] Added ${newGemini.length} Gemini results (skipped ${gemini.length - newGemini.length} for covered platforms)`);
     } else {
       console.warn("[Search] Gemini search failed:", (geminiResults as any).reason?.message);
     }

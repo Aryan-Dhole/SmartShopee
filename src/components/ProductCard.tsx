@@ -153,7 +153,7 @@ export default function ProductCard({
           }`}>
           <Star className="fill-yellow-400 stroke-yellow-400" size={12} />
           <span className={`font-bold ${darkMode ? "text-neutral-300" : "text-neutral-700"}`}>
-            {product.rating}
+            {Number(product.rating).toFixed(1)}
           </span>
           <span>
             ({product.reviewsCount.toLocaleString()})

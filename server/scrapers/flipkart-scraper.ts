@@ -11,6 +11,7 @@ import { simpleHash, getPlaceholderImage } from "../utils/price-utils";
 
 const FLIPKART_BASE = "https://www.flipkart.com";
 const SEARCH_URL = `${FLIPKART_BASE}/search`;
+const MAX_RESULTS = 50; // No practical cap — return all results found
 
 const USER_AGENTS = [
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
@@ -35,6 +36,38 @@ function getHeaders(): Record<string, string> {
   };
 }
 
+// ─── Title Validation ───────────────────────────────────────────────
+
+const GARBAGE_TITLE_PATTERNS = [
+  /^add to (compare|cart|wishlist|bag)/i,
+  /^(buy now|shop now|view (details|all|more)|see (all|more)|sponsored)/i,
+  /^(best seller|limited deal|lightning deal|great indian|sale|offer)/i,
+  /^(compare|select|choose|filter|sort|results?|showing)/i,
+  /^(free delivery|emi available|no cost emi|bank offer)/i,
+  /^(fulfilled by|sold by|shipped by|delivered by)/i,
+  /^\d+\s*(ratings?|reviews?|stars?|%\s*off)/i,
+  /^₹/,
+  /^(assured|super ?coin|plus ?member)/i,
+];
+
+function isValidTitle(title: string): boolean {
+  if (!title || title.length < 8) return false;
+  if (title.length > 500) return false;
+
+  const lower = title.toLowerCase().trim();
+
+  // Check against garbage patterns
+  for (const pattern of GARBAGE_TITLE_PATTERNS) {
+    if (pattern.test(lower)) return false;
+  }
+
+  // Reject titles that are mostly numbers/symbols
+  const letterCount = (title.match(/[a-zA-Z]/g) || []).length;
+  if (letterCount < 4) return false;
+
+  return true;
+}
+
 // ─── Price Parser ───────────────────────────────────────────────────
 
 function parseFlipkartPrice(text: string): number | null {
@@ -46,6 +79,17 @@ function parseFlipkartPrice(text: string): number | null {
     if (price > 0 && price < 50_000_000) return Math.round(price);
   }
   return null;
+}
+
+/**
+ * Cap original price to a sane multiple of the current price.
+ * Prevents inflated MSRP (e.g., ₹50,00,000 MRP on a ₹15,000 item).
+ */
+function sanitizeOriginalPrice(price: number, originalPrice: number | undefined): number | undefined {
+  if (!originalPrice || originalPrice <= price) return undefined;
+  // Cap at 3× the current price — anything beyond is clearly wrong
+  if (originalPrice > price * 3) return undefined;
+  return originalPrice;
 }
 
 // ─── Search Scraper ─────────────────────────────────────────────────
@@ -90,7 +134,7 @@ export async function scrapeFlipkartSearch(query: string): Promise<FlipkartScrap
     console.log(`[FlipkartScraper] Found ${productLinks.length} product links`);
 
     for (const link of productLinks) {
-      if (results.length >= 6) break;
+      if (results.length >= MAX_RESULTS) break;
 
       const $link = $(link);
       const href = $link.attr("href") || "";
@@ -104,9 +148,8 @@ export async function scrapeFlipkartSearch(query: string): Promise<FlipkartScrap
       // Navigate up to find the product card container
       const $card = $link.closest('[data-id]').length ? $link.closest('[data-id]') : $link.parent().parent().parent();
 
-      // ── Title: Try multiple selectors
+      // ── Title: Try multiple selectors with validation
       let title = "";
-      // Flipkart titles are usually in specific class-based divs — try common patterns
       const titleCandidates = [
         $card.find('a[title]').first().attr("title"),
         $card.find('div[class*="col"] a > div:first-child').first().text(),
@@ -114,32 +157,57 @@ export async function scrapeFlipkartSearch(query: string): Promise<FlipkartScrap
         $link.attr("title"),
       ];
       for (const candidate of titleCandidates) {
-        if (candidate && candidate.trim().length > 5) {
-          title = candidate.trim();
+        const cleaned = candidate?.trim() || "";
+        if (cleaned.length > 5 && isValidTitle(cleaned)) {
+          title = cleaned;
           break;
         }
       }
       if (!title) continue;
 
-      // ── Price: Look for ₹ symbol in the card
+      // ── Price: Look for ₹ symbol in the card, but use targeted selectors first
       let price: number | null = null;
       let originalPrice: number | undefined;
 
-      // Scan all text nodes in the card for price patterns
-      const allText = $card.text();
-      const priceMatches = allText.match(/₹[\s]*[\d,]+/g);
-      if (priceMatches && priceMatches.length > 0) {
-        // Usually the first price is current, second is original
-        price = parseFlipkartPrice(priceMatches[0]);
-        if (priceMatches.length > 1) {
-          const mrp = parseFlipkartPrice(priceMatches[1]);
-          if (mrp && price && mrp > price) {
-            originalPrice = mrp;
+      // Try targeted price selectors first (more reliable than scanning all text)
+      const priceSelectors = [
+        $card.find('div[class*="Nx9bqj"]').first().text(),  // Common Flipkart price class pattern
+        $card.find('div[class*="hl05eU"] > div:first-child').first().text(),
+      ];
+      
+      for (const pText of priceSelectors) {
+        if (pText && pText.includes("₹")) {
+          price = parseFlipkartPrice(pText);
+          if (price) break;
+        }
+      }
+
+      // Fallback: Scan text nodes for price patterns, but be careful
+      if (!price) {
+        // Only look at text that starts with ₹ to avoid picking up rating counts
+        const allText = $card.text();
+        const priceMatches = allText.match(/₹[\s]*[\d,]+/g);
+        if (priceMatches && priceMatches.length > 0) {
+          // Filter out prices that look like rating counts (small numbers)
+          const validPrices = priceMatches
+            .map(p => parseFlipkartPrice(p))
+            .filter((p): p is number => p !== null && p >= 50); // Minimum ₹50 threshold
+          
+          if (validPrices.length > 0) {
+            // Sort ascending — current price is usually the lowest
+            validPrices.sort((a, b) => a - b);
+            price = validPrices[0];
+            if (validPrices.length > 1 && validPrices[validPrices.length - 1] > price) {
+              originalPrice = validPrices[validPrices.length - 1];
+            }
           }
         }
       }
 
       if (!price) continue;
+
+      // Sanitize MSRP
+      originalPrice = sanitizeOriginalPrice(price, originalPrice);
 
       // ── Image
       let imageUrl = $card.find("img").first().attr("src") || $card.find("img").first().attr("data-src") || "";
@@ -222,22 +290,40 @@ export async function scrapeFlipkartProduct(productUrl: string): Promise<Product
       $("h1").first().text().trim() ||
       $('meta[property="og:title"]').attr("content")?.trim() || ""
     );
-    if (!title) return null;
+    if (!title || !isValidTitle(title)) return null;
 
-    // Price
-    const allText = $("body").text();
-    const priceMatches = allText.match(/₹[\s]*[\d,]+/g);
+    // Price — use targeted selectors first
     let price: number | null = null;
     let originalPrice: number | undefined;
 
-    if (priceMatches) {
-      price = parseFlipkartPrice(priceMatches[0]);
-      if (priceMatches.length > 1) {
-        const mrp = parseFlipkartPrice(priceMatches[1]);
-        if (mrp && price && mrp > price) originalPrice = mrp;
+    // Try meta tag price first
+    const metaPrice = $('meta[property="product:price:amount"]').attr("content");
+    if (metaPrice) {
+      price = parseFlipkartPrice(metaPrice);
+    }
+
+    // Fallback to text scanning
+    if (!price) {
+      const allText = $("body").text();
+      const priceMatches = allText.match(/₹[\s]*[\d,]+/g);
+      if (priceMatches) {
+        const validPrices = priceMatches
+          .map(p => parseFlipkartPrice(p))
+          .filter((p): p is number => p !== null && p >= 50);
+        
+        if (validPrices.length > 0) {
+          validPrices.sort((a, b) => a - b);
+          price = validPrices[0];
+          if (validPrices.length > 1 && validPrices[validPrices.length - 1] > price) {
+            originalPrice = validPrices[validPrices.length - 1];
+          }
+        }
       }
     }
     if (!price) return null;
+
+    // Sanitize MSRP
+    originalPrice = sanitizeOriginalPrice(price, originalPrice);
 
     // Image
     let imageUrl = $('meta[property="og:image"]').attr("content") || 

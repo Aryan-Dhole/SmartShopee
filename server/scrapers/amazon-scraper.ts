@@ -11,6 +11,7 @@ import { simpleHash, getPlaceholderImage } from "../utils/price-utils";
 
 const AMAZON_BASE = "https://www.amazon.in";
 const SEARCH_URL = `${AMAZON_BASE}/s`;
+const MAX_RESULTS = 50; // No practical cap — return all results found
 
 const USER_AGENTS = [
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
@@ -39,6 +40,37 @@ function getHeaders(): Record<string, string> {
   };
 }
 
+// ─── Title Validation ───────────────────────────────────────────────
+
+const GARBAGE_TITLE_PATTERNS = [
+  /^add to (compare|cart|wishlist|bag)/i,
+  /^(buy now|shop now|view (details|all|more)|see all|sponsored)/i,
+  /^(best seller|limited deal|lightning deal|great indian|sale|offer)/i,
+  /^(compare|select|choose|filter|sort|results?|showing)/i,
+  /^(free delivery|emi available|no cost emi|bank offer)/i,
+  /^(fulfilled by|sold by|shipped by|delivered by)/i,
+  /^\d+\s*(ratings?|reviews?|stars?|%\s*off)/i,
+  /^₹/,
+];
+
+function isValidTitle(title: string): boolean {
+  if (!title || title.length < 8) return false;
+  if (title.length > 500) return false;
+
+  const lower = title.toLowerCase().trim();
+
+  // Check against garbage patterns
+  for (const pattern of GARBAGE_TITLE_PATTERNS) {
+    if (pattern.test(lower)) return false;
+  }
+
+  // Reject titles that are mostly numbers/symbols
+  const letterCount = (title.match(/[a-zA-Z]/g) || []).length;
+  if (letterCount < 4) return false;
+
+  return true;
+}
+
 // ─── Price Parser ───────────────────────────────────────────────────
 
 function parseAmazonPrice(text: string): number | null {
@@ -52,6 +84,17 @@ function parseAmazonPrice(text: string): number | null {
     if (price > 0 && price < 50_000_000) return Math.round(price);
   }
   return null;
+}
+
+/**
+ * Cap original price to a sane multiple of the current price.
+ * Prevents inflated MSRP (e.g., ₹50,00,000 MRP on a ₹15,000 item).
+ */
+function sanitizeOriginalPrice(price: number, originalPrice: number | undefined): number | undefined {
+  if (!originalPrice || originalPrice <= price) return undefined;
+  // Cap at 3× the current price — anything beyond is clearly wrong
+  if (originalPrice > price * 3) return undefined;
+  return originalPrice;
 }
 
 // ─── Search Scraper ─────────────────────────────────────────────────
@@ -90,16 +133,21 @@ export async function scrapeAmazonSearch(query: string): Promise<AmazonScraperRe
     console.log(`[AmazonScraper] Found ${searchResults.length} raw result cards`);
 
     searchResults.each((index, element) => {
-      if (results.length >= 6) return false; // Limit to 6 results
+      if (results.length >= MAX_RESULTS) return false;
 
       const $el = $(element);
       const asin = $el.attr("data-asin");
       if (!asin) return;
 
+      // Skip sponsored results
+      if ($el.find('.s-label-popover-default, [data-component-type="sp-sponsored-result"]').length > 0) {
+        return;
+      }
+
       // ── Title
       const titleEl = $el.find("h2 a span, h2 span.a-text-normal").first();
       const title = titleEl.text().trim();
-      if (!title || title.length < 3) return;
+      if (!isValidTitle(title)) return;
 
       // ── Price (current)
       const priceWhole = $el.find(".a-price:not(.a-text-price) .a-price-whole").first().text();
@@ -107,7 +155,7 @@ export async function scrapeAmazonSearch(query: string): Promise<AmazonScraperRe
       let price = parseAmazonPrice(priceWhole);
       if (!price) {
         // Try alternate price selectors
-        const altPrice = $el.find(".a-price .a-offscreen").first().text();
+        const altPrice = $el.find(".a-price:not(.a-text-price) .a-offscreen").first().text();
         price = parseAmazonPrice(altPrice);
       }
       if (!price) return;
@@ -119,6 +167,8 @@ export async function scrapeAmazonSearch(query: string): Promise<AmazonScraperRe
       if (mrpParsed && mrpParsed > price) {
         originalPrice = mrpParsed;
       }
+      // Sanitize to prevent absurd MSRP values
+      originalPrice = sanitizeOriginalPrice(price, originalPrice);
 
       // ── Product URL
       const linkEl = $el.find("h2 a, a.a-link-normal.s-no-outline").first();
@@ -206,11 +256,11 @@ export async function scrapeAmazonProduct(productUrl: string): Promise<ProductSe
       $("h1#title span").text().trim() ||
       $("h1 span.product-title-word-break").text().trim()
     );
-    if (!title) return null;
+    if (!title || !isValidTitle(title)) return null;
 
     // Price
     const priceText = (
-      $(".a-price .a-offscreen").first().text() ||
+      $(".a-price:not(.a-text-price) .a-offscreen").first().text() ||
       $("#priceblock_dealprice").text() ||
       $("#priceblock_ourprice").text() ||
       $(".a-price-whole").first().text()
@@ -227,6 +277,7 @@ export async function scrapeAmazonProduct(productUrl: string): Promise<ProductSe
     );
     const mrpParsed = parseAmazonPrice(mrpText);
     if (mrpParsed && mrpParsed > price) originalPrice = mrpParsed;
+    originalPrice = sanitizeOriginalPrice(price, originalPrice);
 
     // Image
     let imageUrl = (

@@ -43,6 +43,8 @@ interface ProductDetailModalProps {
   isLoggedIn: boolean;
   onAlertCreated: () => void;
   darkMode?: boolean;
+  /** When true, renders as an inline page component instead of a fixed overlay modal */
+  renderAsPage?: boolean;
 }
 
 export default function ProductDetailModal({
@@ -50,7 +52,8 @@ export default function ProductDetailModal({
   onClose,
   isLoggedIn,
   onAlertCreated,
-  darkMode = false
+  darkMode = false,
+  renderAsPage = false
 }: ProductDetailModalProps) {
   if (!product) return null;
 
@@ -191,25 +194,18 @@ export default function ProductDetailModal({
 
   const discountVal = product.originalPrice ? product.originalPrice - product.price : 0;
 
-  return (
-    <AnimatePresence>
-      <div className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6 md:p-8">
-        {/* Underlay Backdrop with smooth fade blur */}
-        <motion.div
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          exit={{ opacity: 0 }}
-          className="absolute inset-0 bg-neutral-950/70 backdrop-blur-md"
-          onClick={onClose}
-        />
+  // ─── Page mode: render content without the fixed overlay ───
+  const containerClass = renderAsPage
+    ? "relative flex w-full max-w-7xl mx-auto flex-col overflow-hidden rounded-[32px] border border-white/10 bg-[#07070a]/95 backdrop-blur-2xl shadow-2xl my-6 mx-4 md:mx-auto"
+    : "relative z-10 flex h-full max-h-[92vh] w-full max-w-6xl flex-col overflow-hidden rounded-[32px] border border-white/10 bg-[#07070a]/95 backdrop-blur-2xl shadow-2xl";
 
-        {/* Modal Window Container */}
+  const content = (
         <motion.div
-          initial={{ opacity: 0, scale: 0.95, y: 15 }}
+          initial={{ opacity: 0, scale: renderAsPage ? 1 : 0.95, y: renderAsPage ? 0 : 15 }}
           animate={{ opacity: 1, scale: 1, y: 0 }}
-          exit={{ opacity: 0, scale: 0.95, y: 15 }}
+          exit={{ opacity: 0, scale: renderAsPage ? 1 : 0.95, y: renderAsPage ? 0 : 15 }}
           transition={{ type: "spring", stiffness: 300, damping: 25 }}
-          className="relative z-10 flex h-full max-h-[92vh] w-full max-w-6xl flex-col overflow-hidden rounded-[32px] border border-white/10 bg-[#07070a]/95 backdrop-blur-2xl shadow-2xl"
+          className={containerClass}
         >
           {/* Top Bar with actions */}
           <div className="flex items-center justify-between border-b border-white/5 px-6 py-4 bg-white/[0.01]">
@@ -868,6 +864,25 @@ export default function ProductDetailModal({
             </div>
           </div>
         </motion.div>
+  );
+
+  // ─── Render mode switch ───
+  if (renderAsPage) {
+    return content;
+  }
+
+  return (
+    <AnimatePresence>
+      <div className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6 md:p-8">
+        {/* Underlay Backdrop with smooth fade blur */}
+        <motion.div
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          className="absolute inset-0 bg-neutral-950/70 backdrop-blur-md"
+          onClick={onClose}
+        />
+        {content}
       </div>
     </AnimatePresence>
   );

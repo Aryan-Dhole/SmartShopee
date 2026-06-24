@@ -18,8 +18,6 @@ import { useApp } from '../contexts/AppContext';
 import { ProductSearchResult } from '../types';
 import ProductCard from '../components/ProductCard';
 import SearchFilters, { FilterState } from '../components/SearchFilters';
-import ProductDetailModal from '../components/ProductDetailModal';
-import { searchProductsWithGemini } from '../services/gemini-client';
 
 // ─── Search Loader Component ────────────────────────────────────────
 
@@ -121,9 +119,6 @@ export default function SearchPage() {
   const inputRef = useRef<HTMLInputElement>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
-  // Selected product for detail modal
-  const [selectedProduct, setSelectedProduct] = useState<ProductSearchResult | null>(null);
-
   const location = useLocation();
   const navigate = useNavigate();
 
@@ -134,26 +129,11 @@ export default function SearchPage() {
     }
   }, [location.pathname]);
 
-  // Debounced pre-fetch: start Gemini search in background while user types
-  // so results are ready (cached) when they press Search
-  const prefetchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const lastPrefetch = useRef('');
-
-  const triggerPrefetch = useCallback((q: string) => {
-    if (prefetchTimer.current) clearTimeout(prefetchTimer.current);
-    prefetchTimer.current = setTimeout(() => {
-      if (q.trim().length > 2 && q !== lastPrefetch.current) {
-        lastPrefetch.current = q;
-        // Fire-and-forget: warms the cache silently
-        searchProductsWithGemini(q).catch(() => {});
-      }
-    }, 600);
-  }, []);
-
   // Apply filters whenever results or filters change
   useEffect(() => {
     applyFilters(searchResults, filters);
   }, [searchResults, filters]);
+
 
   // Close dropdown on outside click
   useEffect(() => {
@@ -213,6 +193,10 @@ export default function SearchPage() {
 
   const handleCompareNavigate = () => {
     navigate('/compare');
+  };
+
+  const handleProductSelect = (product: ProductSearchResult) => {
+    navigate(`/product/${product.id}`, { state: { product } });
   };
 
   const showHistoryDropdown = inputFocused && searchHistory.length > 0 && !searching;
@@ -424,7 +408,7 @@ export default function SearchPage() {
                     product={product}
                     isCompared={comparedProducts.some((p) => p.id === product.id)}
                     onToggleCompare={handleToggleCompare}
-                    onSelect={() => setSelectedProduct(product)}
+                    onSelect={() => handleProductSelect(product)}
                     darkMode={darkMode}
                   />
                 ))}
@@ -484,24 +468,6 @@ export default function SearchPage() {
         </div>
       </div>
 
-      {/* Product Detail Modal */}
-      <ProductDetailModal
-        product={selectedProduct}
-        onClose={() => setSelectedProduct(null)}
-        isLoggedIn={!!currentUser}
-        onAlertCreated={() => {
-          addNotification({
-            id: Date.now().toString(),
-            title: '✅ Price Alert Set',
-            message: `We'll notify you when ${selectedProduct?.title} drops below your target.`,
-            productName: selectedProduct?.title || '',
-            priceTag: `₹${selectedProduct?.price}`,
-            platform: selectedProduct?.platform || '',
-            type: 'alert',
-          });
-          setSelectedProduct(null);
-        }}
-      />
     </div>
   );
 }

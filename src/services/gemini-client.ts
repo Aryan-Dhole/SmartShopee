@@ -60,7 +60,7 @@ function validateResults(results: any[], query: string): ProductSearchResult[] {
     .filter((item) => {
       const price = Number(item.price);
       if (!price || price <= 0 || price > 50_000_000) return false;
-      if (!item.title || typeof item.title !== "string" || item.title.trim().length < 2) return false;
+      if (!item.title || typeof item.title !== "string" || item.title.trim().length < 5) return false;
       return true;
     })
     .map((item, index) => {
@@ -72,16 +72,31 @@ function validateResults(results: any[], query: string): ProductSearchResult[] {
       let imageUrl = item.imageUrl || "";
       if (!imageUrl.startsWith("http")) imageUrl = getPlaceholderImage(query);
 
+      // Fix duplicate brand names (e.g., "DailyObjects DailyObjects Bag")
+      let title = item.title.trim();
+      const words = title.split(" ");
+      if (words.length >= 2) {
+        const firstWord = words[0].toLowerCase();
+        const secondWord = words[1].toLowerCase();
+        if (firstWord === secondWord) {
+          title = words.slice(1).join(" ");
+        }
+      }
+
+      // Round rating to 1 decimal
+      const rawRating = Number(item.rating) || 4.0;
+      const rating = Math.round(Math.min(5, Math.max(0, rawRating)) * 10) / 10;
+
       return {
-        id: simpleHash(platform + item.title + index),
-        title: item.title.trim(),
+        id: simpleHash(platform + title + index),
+        title,
         price: itemPrice,
-        originalPrice: originalPrice && originalPrice > itemPrice ? originalPrice : undefined,
+        originalPrice: originalPrice && originalPrice > itemPrice && originalPrice <= itemPrice * 3 ? originalPrice : undefined,
         platform,
         url,
         imageUrl,
-        rating: Math.min(5, Math.max(0, Number(item.rating) || 4.0)),
-        reviewsCount: Math.max(0, Number(item.reviewsCount) || 0),
+        rating,
+        reviewsCount: Math.max(0, Math.round(Number(item.reviewsCount) || 0)),
         specs: item.specs || {},
       };
     });
@@ -119,18 +134,18 @@ export async function searchProductsWithGemini(query: string): Promise<ProductSe
 
   const prompt = `Search for "${query}" on major Indian e-commerce platforms.
 
-Instructions:
-1. Search across: Amazon India, Flipkart, Croma, Vijay Sales, Reliance Digital, Snapdeal, Meesho, JioMart, Tata CLiQ
-2. Return 4-6 real, currently available product listings with CURRENT prices in INR
-3. Include the exact product title as shown on each platform
-4. Include real star ratings (out of 5) and review counts
-5. Include actual product listing URLs (e.g. https://www.amazon.in/dp/XXXXX)
+You MUST:
+1. Search across ALL platforms: Amazon India, Flipkart, Croma, Vijay Sales, Reliance Digital, Snapdeal, Meesho, JioMart, Tata CLiQ, Myntra
+2. Return 8-15 real, currently available listings with CURRENT prices in INR
+3. Only return the EXACT product matching "${query}" — do NOT return accessories, cases, covers, cables, adapters, or related items
+4. Ratings must be rounded to 1 decimal place (e.g., 4.2 not 4.5873017)
+5. Include actual product listing URLs
 6. Include product image URLs
 
-Return the result as a JSON array wrapped in \`\`\`json block. Each object must have: title (string), price (number), originalPrice (number), platform (string), url (string), imageUrl (string), rating (number), reviewsCount (number).
-IMPORTANT: Only include listings you can verify. Do NOT fabricate data.`;
+Return ONLY a JSON array in \`\`\`json block. Each object: title (string), price (number), originalPrice (number or null), platform (string), url (string), imageUrl (string), rating (number 1 decimal), reviewsCount (number).
+Do NOT fabricate data. If unsure, omit that platform.`;
 
-  const TIMEOUT_MS = 25_000;
+  const TIMEOUT_MS = 30_000;
 
   const geminiPromise = ai.models.generateContent({
     model: "gemini-2.5-flash",

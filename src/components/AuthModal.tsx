@@ -4,7 +4,7 @@ import { Shield, Lock, ChevronRight, X, Mail, Eye, EyeOff } from 'lucide-react';
 import { useApp } from '../contexts/AppContext';
 
 export default function AuthModal() {
-  const { showAuthModal, setShowAuthModal, handleGoogleSignIn, handleClerkSignIn, darkMode } =
+  const { showAuthModal, setShowAuthModal, handleGoogleSignIn, handleEmailSignIn, darkMode } =
     useApp();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -174,7 +174,7 @@ export default function AuthModal() {
 
             {/* Sign In Button */}
             <button
-              onClick={() => handleClerkSignIn(email || 'clerk-user@pricewise.app')}
+              onClick={() => handleEmailSignIn(email || 'user@pricewise.app')}
               className="w-full rounded-xl bg-gradient-to-r from-indigo-600 to-purple-600 py-3.5 text-sm font-bold text-white tracking-tight hover:opacity-90 shadow-lg shadow-indigo-500/20 transition-all cursor-pointer"
             >
               Sign In
@@ -183,7 +183,7 @@ export default function AuthModal() {
             {/* Quick Demo Access */}
             <div className="pt-1">
               <button
-                onClick={() => handleClerkSignIn('demo@pricewise.app')}
+                onClick={() => handleEmailSignIn('demo@pricewise.app')}
                 className={`w-full text-center py-2 rounded-lg text-[10px] font-mono transition-all cursor-pointer ${
                   darkMode
                     ? 'text-white/30 hover:text-white/60'

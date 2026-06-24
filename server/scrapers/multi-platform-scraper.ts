@@ -6,6 +6,9 @@
 import { ProductSearchResult } from "../types";
 import { scrapeAmazonSearch, scrapeAmazonProduct } from "./amazon-scraper";
 import { scrapeFlipkartSearch, scrapeFlipkartProduct } from "./flipkart-scraper";
+import { scrapeCromaSearch } from "./croma-scraper";
+import { scrapeRelianceSearch } from "./reliance-scraper";
+import { scrapeMyntraSearch } from "./myntra-scraper";
 import { isProductUrl, parseProductUrl } from "../utils/url-parser";
 
 // ─── Types ──────────────────────────────────────────────────────────
@@ -142,11 +145,15 @@ async function scrapeSearchQuery(
 ): Promise<ProductSearchResult[]> {
   const allResults: ProductSearchResult[] = [];
 
-  // Run scrapers in parallel with individual timeout protection
-  const [amazonResult, flipkartResult] = await Promise.allSettled([
-    scrapeAmazonSearch(query),
-    scrapeFlipkartSearch(query),
-  ]);
+  // Run ALL scrapers in parallel with individual timeout protection
+  const [amazonResult, flipkartResult, cromaResult, relianceResult, myntraResult] =
+    await Promise.allSettled([
+      scrapeAmazonSearch(query),
+      scrapeFlipkartSearch(query),
+      scrapeCromaSearch(query),
+      scrapeRelianceSearch(query),
+      scrapeMyntraSearch(query),
+    ]);
 
   // Process Amazon results
   if (amazonResult.status === "fulfilled") {
@@ -188,6 +195,66 @@ async function scrapeSearchQuery(
     });
   }
 
+  // Process Croma results
+  if (cromaResult.status === "fulfilled") {
+    const { results, responseTimeMs } = cromaResult.value;
+    allResults.push(...results);
+    sourcesMeta.push({
+      name: "Croma Store",
+      resultCount: results.length,
+      responseTimeMs,
+      status: results.length > 0 ? "success" : "failed",
+    });
+  } else {
+    console.error("[MultiScraper] Croma scraper rejected:", cromaResult.reason);
+    sourcesMeta.push({
+      name: "Croma Store",
+      resultCount: 0,
+      responseTimeMs: 0,
+      status: "failed",
+    });
+  }
+
+  // Process Reliance Digital results
+  if (relianceResult.status === "fulfilled") {
+    const { results, responseTimeMs } = relianceResult.value;
+    allResults.push(...results);
+    sourcesMeta.push({
+      name: "Reliance Digital",
+      resultCount: results.length,
+      responseTimeMs,
+      status: results.length > 0 ? "success" : "failed",
+    });
+  } else {
+    console.error("[MultiScraper] Reliance scraper rejected:", relianceResult.reason);
+    sourcesMeta.push({
+      name: "Reliance Digital",
+      resultCount: 0,
+      responseTimeMs: 0,
+      status: "failed",
+    });
+  }
+
+  // Process Myntra results
+  if (myntraResult.status === "fulfilled") {
+    const { results, responseTimeMs } = myntraResult.value;
+    allResults.push(...results);
+    sourcesMeta.push({
+      name: "Myntra",
+      resultCount: results.length,
+      responseTimeMs,
+      status: results.length > 0 ? "success" : "failed",
+    });
+  } else {
+    console.error("[MultiScraper] Myntra scraper rejected:", myntraResult.reason);
+    sourcesMeta.push({
+      name: "Myntra",
+      resultCount: 0,
+      responseTimeMs: 0,
+      status: "failed",
+    });
+  }
+
   return allResults;
 }
 
@@ -200,16 +267,18 @@ export async function scrapeDealsForProduct(
   const startTime = Date.now();
   const sourcesMeta: ScrapeMetadata["sources"] = [];
 
-  // Search for the product on both platforms
-  const [amazonResult, flipkartResult] = await Promise.allSettled([
+  // Search for the product on all platforms
+  const [amazonResult, flipkartResult, cromaResult, relianceResult] = await Promise.allSettled([
     scrapeAmazonSearch(productName),
     scrapeFlipkartSearch(productName),
+    scrapeCromaSearch(productName),
+    scrapeRelianceSearch(productName),
   ]);
 
   const deals: any[] = [];
 
   // Convert search results into deal format
-  const processResults = (results: ProductSearchResult[], platform: string) => {
+  const processResults = (results: ProductSearchResult[], _platform: string) => {
     // Take the best match (first result, which is usually most relevant)
     const bestMatch = results[0];
     if (bestMatch) {
@@ -241,6 +310,26 @@ export async function scrapeDealsForProduct(
       name: "Flipkart",
       resultCount: flipkartResult.value.results.length,
       responseTimeMs: flipkartResult.value.responseTimeMs,
+      status: "success",
+    });
+  }
+
+  if (cromaResult.status === "fulfilled" && cromaResult.value.results.length > 0) {
+    processResults(cromaResult.value.results, "Croma Store");
+    sourcesMeta.push({
+      name: "Croma Store",
+      resultCount: cromaResult.value.results.length,
+      responseTimeMs: cromaResult.value.responseTimeMs,
+      status: "success",
+    });
+  }
+
+  if (relianceResult.status === "fulfilled" && relianceResult.value.results.length > 0) {
+    processResults(relianceResult.value.results, "Reliance Digital");
+    sourcesMeta.push({
+      name: "Reliance Digital",
+      resultCount: relianceResult.value.results.length,
+      responseTimeMs: relianceResult.value.responseTimeMs,
       status: "success",
     });
   }

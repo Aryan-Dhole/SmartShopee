@@ -2,7 +2,6 @@ import React, { createContext, useContext, useState, useEffect, useCallback, Rea
 import { auth, googleAuthProvider } from '../firebase';
 import { signInWithPopup, signOut, User, onAuthStateChanged } from 'firebase/auth';
 import { ProductSearchResult, AppNotification } from '../types';
-import { searchProductsWithGemini } from '../services/gemini-client';
 
 // ─── Context Shape ──────────────────────────────────────────────────
 
@@ -11,7 +10,7 @@ interface AppContextType {
   currentUser: User | any | null;
   loadingAuth: boolean;
   handleGoogleSignIn: () => Promise<void>;
-  handleClerkSignIn: (email: string) => void;
+  handleEmailSignIn: (email: string) => void;
   handleSignOut: () => void;
   showAuthModal: boolean;
   setShowAuthModal: (v: boolean) => void;
@@ -124,16 +123,29 @@ export function AppProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
-  const handleClerkSignIn = useCallback((emailOrDemo: string) => {
+  const handleEmailSignIn = useCallback((emailOrDemo: string) => {
     setLoadingAuth(true);
-    const simulatedClerkUser = {
-      uid: 'clerk_authorized_demo_user',
-      email: emailOrDemo || 'premium-clerk-user@auth.io',
-      displayName: 'Clerk Authorized User',
+
+    // Derive a display name from the email
+    const email = emailOrDemo || 'user@pricewise.app';
+    let displayName = 'User';
+    if (email.includes('@')) {
+      // Extract part before @ and capitalize first letter
+      const namePart = email.split('@')[0].replace(/[._-]/g, ' ').trim();
+      displayName = namePart.charAt(0).toUpperCase() + namePart.slice(1);
+    }
+    if (email === 'demo@pricewise.app') {
+      displayName = 'Demo User';
+    }
+
+    const simulatedUser = {
+      uid: 'email_authorized_user_' + Date.now(),
+      email,
+      displayName,
       photoURL: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?q=80&w=150&auto=format&fit=crop',
     };
-    localStorage.setItem('clerk_demo_session', JSON.stringify(simulatedClerkUser));
-    setCurrentUser(simulatedClerkUser);
+    localStorage.setItem('clerk_demo_session', JSON.stringify(simulatedUser));
+    setCurrentUser(simulatedUser);
     setWatchlistOpen(true);
     setShowAuthModal(false);
     setLoadingAuth(false);
@@ -144,7 +156,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       message: 'You have authenticated successfully. All tracking monitors are now active.',
       productName: 'Auth Guard',
       priceTag: 'Live connection',
-      platform: 'CLERK',
+      platform: 'SYSTEM',
       type: 'system',
       timestamp: new Date(),
     };
@@ -181,28 +193,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
       });
 
       try {
-        // Run client-side Gemini and server API in parallel — first valid response wins
-        const clientSearch = searchProductsWithGemini(queryToRun);
-        const serverSearch = fetch(`/api/search?q=${encodeURIComponent(queryToRun)}`)
-          .then(r => r.json())
-          .then(data => (data.results && data.results.length > 0 ? data.results : null))
-          .catch(() => null);
-
-        // Show whichever valid result comes first
-        const raceResult = await Promise.any([
-          clientSearch.then(r => r && r.length > 0 ? r : Promise.reject('empty')),
-          serverSearch.then(r => r && r.length > 0 ? r : Promise.reject('empty')),
-        ]).catch(() => null);
-
-        if (raceResult) {
-          setSearchResults(raceResult);
-          setSearching(false);
-          return;
-        }
-
-        // Both returned empty — wait for whichever has a non-null value
-        const [clientResult, serverResult] = await Promise.all([clientSearch, serverSearch]);
-        setSearchResults(clientResult || serverResult || []);
+        // Use server API exclusively — it runs all 5 scrapers + Gemini in parallel
+        // and returns properly deduplicated, validated results across all platforms.
+        // Client-side Gemini is NOT used here to prevent Myntra-only race condition.
+        const response = await fetch(`/api/search?q=${encodeURIComponent(queryToRun)}`);
+        if (!response.ok) throw new Error(`Server returned ${response.status}`);
+        const data = await response.json();
+        const results = data.results || [];
+        setSearchResults(results);
       } catch (err) {
         console.error('Search query failed:', err);
         setSearchResults([]);
@@ -212,6 +210,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     },
     [searchQuery]
   );
+
 
   const clearSearchHistory = useCallback(() => {
     setSearchHistory([]);
@@ -264,7 +263,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     currentUser,
     loadingAuth,
     handleGoogleSignIn,
-    handleClerkSignIn,
+    handleEmailSignIn,
     handleSignOut,
     showAuthModal,
     setShowAuthModal,

@@ -6,6 +6,7 @@ import DashboardPage from './pages/DashboardPage';
 import ComparePage from './pages/ComparePage';
 import PricingPage from './pages/PricingPage';
 import SettingsPage from './pages/SettingsPage';
+import ProductDetailPage from './pages/ProductDetailPage';
 
 export const router = createBrowserRouter([
   {
@@ -19,6 +20,10 @@ export const router = createBrowserRouter([
       {
         path: 'search',
         element: <SearchPage />,
+      },
+      {
+        path: 'product/:id',
+        element: <ProductDetailPage />,
       },
       {
         path: 'dashboard',

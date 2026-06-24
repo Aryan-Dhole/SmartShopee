@@ -255,9 +255,9 @@ async function startServer() {
       timestamp: new Date().toISOString(),
       uptime: Math.round(process.uptime()),
       geminiKeySet: !!process.env.GEMINI_API_KEY && process.env.GEMINI_API_KEY !== "MY_GEMINI_API_KEY",
-      version: "2.0.0",
+      version: "2.1.0",
       features: {
-        scrapers: ["amazon_india", "flipkart"],
+        scrapers: ["amazon_india", "flipkart", "croma", "reliance_digital", "myntra"],
         ai: ["gemini_search_grounding", "review_synthesis", "comparison", "chat"],
       },
     });
@@ -295,13 +295,13 @@ async function startServer() {
   // ── Start ─────────────────────────────────────────────────────
 
   const server = app.listen(PORT, "0.0.0.0", () => {
-    console.log(`\n  ╔═══════════════════════════════════════════╗`);
-    console.log(`  ║  PriceWise Server v2.0                    ║`);
-    console.log(`  ║  http://localhost:${PORT}                    ║`);
-    console.log(`  ║  Gemini API: ${process.env.GEMINI_API_KEY ? "✓ Configured" : "✗ Not Set   "}        ║`);
-    console.log(`  ║  Scrapers:  Amazon India, Flipkart         ║`);
-    console.log(`  ║  Mode:      ${isProd ? "Production " : "Development"}              ║`);
-    console.log(`  ╚═══════════════════════════════════════════╝\n`);
+    console.log(`\n  ╔═══════════════════════════════════════════════════════╗`);
+    console.log(`  ║  PriceWise Server v2.1                                ║`);
+    console.log(`  ║  http://localhost:${PORT}                                ║`);
+    console.log(`  ║  Gemini API: ${process.env.GEMINI_API_KEY ? "✓ Configured" : "✗ Not Set   "}                    ║`);
+    console.log(`  ║  Scrapers:  Amazon, Flipkart, Croma, Reliance, Myntra  ║`);
+    console.log(`  ║  Mode:      ${isProd ? "Production " : "Development"}                          ║`);
+    console.log(`  ╚═══════════════════════════════════════════════════════╝\n`);
 
     // Initialize background cron jobs
     startPriceTracker(1000 * 60 * 60 * 24); // Run daily for prototype
